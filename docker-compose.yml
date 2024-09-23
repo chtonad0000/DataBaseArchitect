@@ -1,0 +1,164 @@
+version: "3.8"
+
+name: "sport_center"
+networks:
+    sport_center:
+
+services:
+  etcd1: &etcd
+        image: ${PATRONI_TEST_IMAGE:-patroni}
+        networks: [ sport_center ]
+        environment:
+            ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+            ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+            ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+            ETCD_INITIAL_CLUSTER_STATE: new
+            ETCD_INITIAL_CLUSTER_TOKEN: tutorial
+            ETCD_UNSUPPORTED_ARCH: arm64
+        container_name: etdc_1
+        hostname: etcd1
+        command: etcd --name etcd1 --initial-advertise-peer-urls http://etcd1:2380
+
+  etcd2:
+      <<: *etcd
+      container_name: etdc_2
+      hostname: etcd2
+      command: etcd --name etcd2 --initial-advertise-peer-urls http://etcd2:2380
+
+  etcd3:
+      <<: *etcd
+      container_name: etdc_3
+      hostname: etcd3
+      command: etcd --name etcd3 --initial-advertise-peer-urls http://etcd3:2380
+
+  haproxy:
+      image: ${PATRONI_TEST_IMAGE:-patroni}
+      networks: [ sport_center ]
+      env_file: patroni/docker/patroni.env
+      hostname: haproxy
+      container_name: haproxy
+      ports:
+          - "5000:5000"
+          - "5001:5001"
+      command: haproxy
+      environment: &haproxy_env
+          ETCDCTL_ENDPOINTS: http://etcd1:2379,http://etcd2:2379,http://etcd3:2379
+          PATRONI_ETCD3_HOSTS: "'etcd1:2379','etcd2:2379','etcd3:2379'"
+          PATRONI_SCOPE: sport_center
+
+  patroni1:
+      image: ${PATRONI_TEST_IMAGE:-patroni}
+      networks: [ sport_center ]
+      env_file: patroni/docker/patroni.env
+      hostname: patroni1
+      container_name: node1
+      environment:
+          <<: *haproxy_env
+          PATRONI_NAME: patroni1
+
+  patroni2:
+      image: ${PATRONI_TEST_IMAGE:-patroni}
+      networks: [ sport_center ]
+      env_file: patroni/docker/patroni.env
+      hostname: patroni2
+      container_name: node2
+      environment:
+          <<: *haproxy_env
+          PATRONI_NAME: patroni2
+
+  patroni3:
+      image: ${PATRONI_TEST_IMAGE:-patroni}
+      networks: [ sport_center ]
+      env_file: patroni/docker/patroni.env
+      hostname: patroni3
+      container_name: node3
+      environment:
+          <<: *haproxy_env
+          PATRONI_NAME: patroni3
+  postgres:
+    container_name: sport_center_infrastructure_db
+    image: postgres:16.1
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PORT=5432
+      - MIGRATION_VERSION=13.0.0
+      - RECORDS_COUNT=100000
+    volumes:
+      - db_volume:/var/lib/postgresql/data
+      - ./scripts:/docker-entrypoint-initdb.d
+      - ./migrations:/migrations
+  query_analyzer:
+    image: python:3.9-slim
+    volumes:
+      - ./results:/app/results
+      - ./scripts/analyze_script.py:/app/scripts/analyze_script.py
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - QUERY_ATTEMPTS=50
+      - CLIENT_ID=568
+      - HALL_ID=299
+    working_dir: /app/scripts
+    command: >
+      sh -c "pip install psycopg2-binary &&
+             python analyze_script.py"
+  backup:
+    image: python:3.9-slim
+    container_name: db_backup_service
+    volumes:
+      - db_volume:/var/lib/postgresql/data
+      - ./scripts/backup.py:/app/scripts/backup.py
+      - ./backups:/app/backups
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - BACKUP_INTERVAL_HOURS=1
+      - BACKUP_RETAIN_COUNT=4
+    depends_on:
+      - postgres
+    command: >
+      /bin/bash -c "echo | apt-get update && echo | apt install -y postgresql-common && echo | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh && echo | apt-get install -y postgresql-client-16
+                    python /app/scripts/backup.py"
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable"
+    ports:
+      - "9187:9187"
+volumes:
+  scripts:
+  db_volume:
+  grafana_data:

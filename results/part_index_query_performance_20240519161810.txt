@@ -1,0 +1,52 @@
+Query: SELECT * FROM training_history WHERE client_id=568
+Best Case: None
+Average Case: None
+Worst Case: None
+
+Query: SELECT * FROM coaches_in_hall WHERE hall_id=299
+Best Case: 15.77
+Average Case: 15.76999999999999
+Worst Case: 15.77
+
+Query: 
+         SELECT
+            hse.hall_id AS Hall_ID,
+            sec.name AS Category_Name,
+            COUNT(hse.sports_equipment_id) AS Equipment_Count
+        FROM
+            new_hall_sports_equipment hse
+        JOIN
+            sports_equipment se ON hse.sports_equipment_id = se.id
+        JOIN
+            sports_equipment_subcategory ses ON se.subcategory_id = ses.id
+        JOIN
+            Sports_equipment_category sec ON ses.category_id = sec.id
+        GROUP BY
+            hse.hall_id, sec.name
+        ORDER BY
+            hse.hall_id, sec.name;
+        
+Best Case: 8489.18
+Average Case: 8489.179999999995
+Worst Case: 8489.18
+
+Query: 
+             SELECT
+                EXTRACT(YEAR FROM start_time) AS year,
+                EXTRACT(MONTH FROM start_time) AS month,
+                COUNT(*) AS subscription_count
+            FROM
+                subscription
+            WHERE
+                start_time >= NOW() - INTERVAL '5 years'
+            GROUP BY
+                EXTRACT(YEAR FROM start_time),
+                EXTRACT(MONTH FROM start_time)
+            ORDER BY
+                year,
+                month;
+            
+Best Case: 3639.29
+Average Case: 3639.29
+Worst Case: 3639.29
+
